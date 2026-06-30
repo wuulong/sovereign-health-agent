@@ -1,0 +1,30 @@
+*.db
+__pycache__/
+.DS_Store
+data/*.txt
+
+# Third-party Binaries (Not Committed)
+bin/
+*.jar
+
+
+# NHI My Health Bank Raw and Backup Data (Privacy Security)
+data/inbox/
+data/raw/
+sys_eng/
+scratch/
+*MyHealthBank*
+*健康存摺*
+*_files/
+*.zip
+*.json
+
+# Patient Anonymized Reports & Consultation Summaries (Privacy Security)
+reports/
+
+# Physical Instance Isolation (Privacy Security)
+data/instances/
+db/instances/
+utils/private_deid_rules.json
+
+
