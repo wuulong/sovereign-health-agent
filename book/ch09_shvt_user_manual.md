@@ -97,20 +97,32 @@ python3 utils/health_query_tool.py [選項]
    ```
 4. **預設自動尋找**：若路徑為 `null`，自動探測專案外部之相對路徑（如 `../../events/TDHI_haba/med-db-in/tw-med-db/db/med.db`）。
 
-#### 2. 自我診斷與測試命令 (CLI)
-開發者或技術家屬可直接於終端機測試 Bridge 的連線與檢索狀態：
+#### 2. CGS v2.4 標準命令列子命令與管道操作 (CLI & Pipeline)
+`tw_med_bridge.py` 完全支援 CGS v2.4 Pipeline-Native 標準，具備結構化子命令、單行緊湊 JSON (`-j/--json`) 與管道串流 (`--stdin`) 支援：
 ```bash
-# 檢查目前 tw-med-db 連線狀態
-python3 utils/tw_med_bridge.py
+# 1. 檢查目前連線狀態 (支援 -j 輸出緊湊 JSON)
+python3 utils/tw_med_bridge.py status
+python3 utils/tw_med_bridge.py status -j
 
-# 測試關鍵字藥物搜尋 (FTS5 / LIKE)
-python3 utils/tw_med_bridge.py -s "萬科"
+# 2. 搜尋官方藥證與健保價 (M01 FTS5 / LIKE)
+python3 utils/tw_med_bridge.py search "萬科"
+python3 utils/tw_med_bridge.py search "萬科" -j
 
-# 測試臨床程式碼反查 (LOINC 或許可證)
-python3 utils/tw_med_bridge.py -c "1001-2"
+# 3. 翻譯臨床檢驗程式碼 (M12 LOINC) 或藥品程式碼
+python3 utils/tw_med_bridge.py code "1001-2"
 
-# 模擬無 tw-med-db 環境下的安全降級測試
-python3 utils/tw_med_bridge.py --no-med-db -s "萬科"
+# 4. 查詢健保給付規定條文 (M06)
+python3 utils/tw_med_bridge.py rule "抗高血糖" -j
+
+# 5. Pipeline 原生管道串接 (Unix-style stdin ➔ stdout)
+echo "1001-2" | python3 utils/tw_med_bridge.py code --stdin -j
+
+# 6. 模擬無 tw-med-db 環境下的安全降級驗證
+python3 utils/tw_med_bridge.py --no-med-db status -j
+
+# 7. 檢視自我描述 Schema 與說明手冊
+python3 utils/tw_med_bridge.py schema
+python3 utils/tw_med_bridge.py man
 ```
 
 #### 3. Python 程式碼直接調用 (API)

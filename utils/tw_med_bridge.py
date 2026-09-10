@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-tw_med_bridge.py - Sovereign Health Agent (SHA) 與 tw-med-db 邊界適配器 (Adapter)
-[規格追溯]: SPC-010, SPC-039, SPC-040, DSN-020, REQ-024, NFR-005
-
-功能：
-1. 支援三級開關控制 (CLI 旗標 > 環境變數 > config.json > 預設路徑)。
-2. 提供唯讀 (Read-only) 連線保護，嚴格隔離病患個人隱私資料庫 (fv_patient_personal.db)。
-3. 封裝 M01 (處方藥證)、M02 (主成分)、M06 (健保給付規定) 與 M12 (LOINC 檢驗碼) 核心查詢。
-4. 100% 安全平滑降級：若未安裝或未啟用 tw-med-db，所有函式安全回傳 None/空串列，不造成主程式崩潰。
+[metadata]
+name: tw_med_bridge.py
+title: Sovereign Health Agent 台灣醫療大數據邊界適配器 (CGS v2.4)
+description: 封裝對地端 tw-med-db 醫療大數據庫之唯讀訪問，支援 M01 藥證、M02 主成分、M06 給付規定與 M12 LOINC 檢驗碼查詢，提供三級開關控制與 100% 零崩潰平滑降級能力。
+category: healthcare_bridge
+spec: @sovereign-health-agent/specs/tw_med_bridge.spec.md
+manual: @sovereign-health-agent/manuals/tw_med_bridge.md
+bman: bman_sha_book:ch09
+seman: seman_sha_sys_eng:02
+dependencies: none
+cgs_version: 2.4
 """
 
 import os
@@ -16,12 +19,26 @@ import sys
 import json
 import sqlite3
 import re
+import argparse
 from typing import Optional, Dict, Any, List, Tuple
+
+# 顯式宣告 CGS 規格版號
+__cli_spec_version__ = "2.4"
+
+# 跨平台 (Windows Console) UTF-8 強制編碼保護
+if sys.platform == "win32":
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    except Exception:
+        pass
 
 # 專案路徑解析
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
+MANUAL_PATH = os.path.join(PROJECT_DIR, "manuals", "tw_med_bridge.md")
 
 # 預設候選 tw-med-db 路徑 (依相對位置探索)
 CANDIDATE_MED_DB_PATHS = [
@@ -30,10 +47,16 @@ CANDIDATE_MED_DB_PATHS = [
     os.path.abspath(os.path.join(PROJECT_DIR, "med.db")),
 ]
 
+def log_msg(msg: str, level: str = "INFO"):
+    """標準化結構化日誌輸出至 stderr (符合 CGS v2.4 流向分離)"""
+    prefix = {"INFO": "ℹ️ [INFO]", "WARN": "⚠️ [WARN]", "ERROR": "❌ [ERROR]", "DEBUG": "🔍 [DEBUG]"}.get(level, "[INFO]")
+    sys.stderr.write(f"{prefix} {msg}\n")
+    sys.stderr.flush()
+
 class TwMedBridge:
     """
     台灣醫療與健保開放大數據引擎 (tw-med-db) 橋接器
-    具備開關控制、狀態診斷與防崩潰平滑降級能力。
+    具備三級開關控制、狀態診斷與防崩潰平滑降級能力。
     """
     def __init__(self, force_enabled: Optional[bool] = None, custom_db_path: Optional[str] = None):
         self.config_enabled = True
@@ -133,9 +156,7 @@ class TwMedBridge:
     # ==========================================
 
     def search_drugs(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """
-        搜尋藥品 (M01 處方藥證與健保價 FTS5 / LIKE)
-        """
+        """搜尋藥品 (M01 處方藥證與健保價 FTS5 / LIKE)"""
         if not self.available or not query or not query.strip():
             return []
 
@@ -147,7 +168,6 @@ class TwMedBridge:
         results = []
         try:
             cursor = conn.cursor()
-            # 1. 嘗試 FTS5 檢索
             fts_sql = """
             SELECT d.drug_code, d.license_id, d.trade_name_tw, d.trade_name_en, 
                    d.ingredient_name, d.indications, d.nhi_price, d.form_description
@@ -162,7 +182,6 @@ class TwMedBridge:
             except Exception:
                 rows = []
 
-            # 2. 若 FTS 未命中，嘗試 LIKE 備援
             if not rows:
                 like_sql = """
                 SELECT drug_code, license_id, trade_name_tw, trade_name_en, 
@@ -194,9 +213,7 @@ class TwMedBridge:
         return results
 
     def get_drug_by_code(self, drug_or_lic_code: str) -> Optional[Dict[str, Any]]:
-        """
-        依許可證號或 drug_code 查詢藥品詳情
-        """
+        """依許可證號或 drug_code 查詢藥品詳情"""
         if not self.available or not drug_or_lic_code:
             return None
 
@@ -235,10 +252,48 @@ class TwMedBridge:
 
         return drug_info
 
+    def get_ingredients(self, ingredient_name_or_code: str) -> List[Dict[str, Any]]:
+        """查詢成分資訊與 ATC 分類 (M02)"""
+        if not self.available or not ingredient_name_or_code:
+            return []
+
+        clean_str = ingredient_name_or_code.strip()
+        conn = self._get_ro_connection()
+        if not conn:
+            return []
+
+        results = []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT name FROM sqlite_master WHERE type='table' AND name='m02_tw_ingredient_map_db';
+            """)
+            if not cursor.fetchone():
+                return []
+
+            cursor.execute("""
+            SELECT ingredient_code, ingredient_name_en, ingredient_name_tw, atc_code, atc_name_tw
+            FROM m02_tw_ingredient_map_db
+            WHERE ingredient_name_en LIKE ? OR ingredient_name_tw LIKE ? OR atc_code = ?
+            LIMIT 10;
+            """, (f"%{clean_str}%", f"%{clean_str}%", clean_str))
+            for r in cursor.fetchall():
+                results.append({
+                    "ingredient_code": r["ingredient_code"],
+                    "ingredient_name_en": r["ingredient_name_en"],
+                    "ingredient_name_tw": r["ingredient_name_tw"],
+                    "atc_code": r["atc_code"],
+                    "atc_name_tw": r["atc_name_tw"]
+                })
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+        return results
+
     def get_payment_rules(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
-        """
-        查詢健保給付規定條文 (M06)
-        """
+        """查詢健保給付規定條文 (M06)"""
         if not self.available or not query:
             return []
 
@@ -272,10 +327,7 @@ class TwMedBridge:
         return rules
 
     def translate_clinical_code(self, code: str) -> Optional[Dict[str, Any]]:
-        """
-        翻譯臨床代碼 (優先比對 M12 LOINC 檢驗碼與 M01 健保藥品許可證)
-        若命中則回傳結構化字典；若未命中或不可用，回傳 None (由呼叫端走 fallback)
-        """
+        """翻譯臨床代碼 (優先比對 M12 LOINC 檢驗碼與 M01 健保藥品許可證)"""
         if not self.available or not code:
             return None
 
@@ -288,7 +340,7 @@ class TwMedBridge:
         try:
             cursor = conn.cursor()
             
-            # 1. 優先比對 M12 LOINC 檢驗代碼 (支援 1001-2 等)
+            # 1. 優先比對 M12 LOINC 檢驗代碼
             cursor.execute("""
             SELECT loinc_num, component_zh, unit, ref_range_min, ref_range_max, fhir_resource_type
             FROM m12_loinc_codes
@@ -307,7 +359,7 @@ class TwMedBridge:
                 }
                 return translation
 
-            # 2. 比對 M01 藥品許可證號或 drug_code (如 DHA00202451009)
+            # 2. 比對 M01 藥品許可證號或 drug_code
             cursor.execute("""
             SELECT drug_code, license_id, trade_name_tw, trade_name_en, ingredient_name, indications
             FROM m01_tw_drug_db
@@ -344,56 +396,190 @@ def get_med_bridge(force_enabled: Optional[bool] = None, custom_db_path: Optiona
     return _global_bridge_instance
 
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="tw_med_bridge 狀態檢測與測試工具")
-    parser.add_argument("--no-med-db", action="store_true", help="強制模擬停用 tw-med-db")
-    parser.add_argument("--db", type=str, help="指定自訂 med.db 路徑")
-    parser.add_argument("-s", "--search", type=str, help="測試搜尋藥品")
-    parser.add_argument("-c", "--code", type=str, help="測試代碼翻譯")
-    parser.add_argument("-r", "--rule", type=str, help="測試給付條文查詢")
+# ==============================================================================
+# CGS v2.4 標準 CLI 子命令路由與管道處理 (Pipeline-Native)
+# ==============================================================================
+
+def get_schema() -> Dict[str, Any]:
+    """回傳符合 CGS v2.4 之自我描述 Schema"""
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "TwMedBridgeSchema",
+        "type": "object",
+        "cgs_spec_version": __cli_spec_version__,
+        "subcommands": {
+            "status": "取得 tw-med-db 連線狀態與路徑",
+            "search": "搜尋藥品許可證與健保價",
+            "code": "翻譯臨床檢驗代碼 (LOINC) 或藥品代碼",
+            "rule": "查詢健保給付規定條文",
+            "schema": "輸出 JSON Schema",
+            "version": "輸出版本資訊"
+        },
+        "properties": {
+            "enabled": {"type": "boolean"},
+            "available": {"type": "boolean"},
+            "status_message": {"type": "string"},
+            "db_path": {"type": ["string", "null"]}
+        }
+    }
+
+def main():
+    # 通用 parent parser 讓子命令前後皆可吃通用 flags
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument("-j", "--json", action="store_true", help="啟用單行緊湊 JSON 格式輸出")
+    parent_parser.add_argument("-q", "--quiet", action="store_true", help="極簡輸出模式")
+    parent_parser.add_argument("--no-med-db", action="store_true", help="強制模擬停用 tw-med-db")
+    parent_parser.add_argument("--with-med-db", action="store_true", help="強制嘗試連線 tw-med-db")
+    parent_parser.add_argument("--db", type=str, help="指定自訂 med.db 路徑")
+    parent_parser.add_argument("--stdin", "-", dest="use_stdin", action="store_true", help="從標準輸入讀取查詢字串")
+
+    parser = argparse.ArgumentParser(
+        description="tw_med_bridge - Sovereign Health Agent 台灣醫療大數據邊界適配器 (CGS v2.4)",
+        parents=[parent_parser],
+        add_help=True
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="子命令清單")
+
+    # status 子命令
+    subparsers.add_parser("status", parents=[parent_parser], help="檢驗當前 Bridge 連線與可用性狀態")
+
+    # search 子命令
+    p_search = subparsers.add_parser("search", parents=[parent_parser], help="搜尋處方藥品與官方藥證 (M01)")
+    p_search.add_argument("query", nargs="?", default="", help="藥物關鍵字")
+    p_search.add_argument("-l", "--limit", type=int, default=5, help="限制回傳筆數")
+
+    # code 子命令
+    p_code = subparsers.add_parser("code", parents=[parent_parser], help="翻譯臨床檢驗代碼或藥品代碼")
+    p_code.add_argument("code_str", nargs="?", default="", help="代碼 (如 1001-2 或許可證號)")
+
+    # rule 子命令
+    p_rule = subparsers.add_parser("rule", parents=[parent_parser], help="查詢健保給付規定條文")
+    p_rule.add_argument("rule_query", nargs="?", default="", help="條文關鍵字")
+    p_rule.add_argument("-l", "--limit", type=int, default=3, help="限制回傳筆數")
+
+    # schema & version & manual
+    subparsers.add_parser("schema", parents=[parent_parser], help="輸出自我描述 JSON Schema")
+    subparsers.add_parser("version", parents=[parent_parser], help="輸出版本資訊")
+    subparsers.add_parser("man", parents=[parent_parser], help="檢視說明手冊")
+    subparsers.add_parser("manual", parents=[parent_parser], help="檢視說明手冊")
+
     args = parser.parse_args()
 
-    force_flag = False if args.no_med_db else None
+    # 決定開關旗標
+    force_flag = None
+    if args.no_med_db:
+        force_flag = False
+    elif args.with_med_db:
+        force_flag = True
+
     bridge = get_med_bridge(force_enabled=force_flag, custom_db_path=args.db)
 
-    print("=" * 60)
-    print("    TwMedBridge 診斷檢驗")
-    print("=" * 60)
-    status = bridge.get_status()
-    print(f"狀態啟用 (Enabled):   {status['enabled']}")
-    print(f"可用性 (Available):  {status['available']}")
-    print(f"狀態訊息:            {status['status_message']}")
-    print(f"資料庫路徑:          {status['db_path']}")
-    print("-" * 60)
+    # 處理 stdin 管道輸入 (僅在顯式指定 --stdin 時讀取，防範非 TTY 背景執行卡住)
+    stdin_data = ""
+    if args.use_stdin:
+        try:
+            stdin_data = sys.stdin.read().strip()
+        except Exception:
+            pass
 
-    if args.search:
-        print(f"🔍 搜尋藥品關鍵字: '{args.search}'")
-        res = bridge.search_drugs(args.search, limit=3)
-        if res:
-            for item in res:
-                print(f"  [{item['drug_code']}] {item['trade_name_tw']} ({item['trade_name_en']}) | {item['ingredient_name']}")
-        else:
-            print("  (未查詢到結果或 tw-med-db 未啟用)")
+    cmd = args.command or "status"
 
-    if args.code:
-        print(f"🔍 翻譯臨床代碼: '{args.code}'")
-        res = bridge.translate_clinical_code(args.code)
-        if res:
-            print(f"  類別: {res['type']}")
-            print(f"  名稱: {res['title']}")
-            print(f"  說明: {res['description']}")
-            print(f"  來源: {res['source']}")
-        else:
-            print("  (未命中代碼或 tw-med-db 未啟用)")
+    try:
+        if cmd == "status":
+            res = bridge.get_status()
+            if args.json:
+                sys.stdout.write(json.dumps(res, ensure_ascii=False, separators=(',', ':')) + "\n")
+            elif args.quiet:
+                sys.stdout.write(f"{res['available']}\n")
+            else:
+                sys.stdout.write("=" * 60 + "\n")
+                sys.stdout.write("    TwMedBridge 診斷檢驗 (CGS v2.4)\n")
+                sys.stdout.write("=" * 60 + "\n")
+                sys.stdout.write(f"狀態啟用 (Enabled):   {res['enabled']}\n")
+                sys.stdout.write(f"可用性 (Available):  {res['available']}\n")
+                sys.stdout.write(f"狀態訊息:            {res['status_message']}\n")
+                sys.stdout.write(f"資料庫路徑:          {res['db_path']}\n")
+                sys.stdout.write("=" * 60 + "\n")
 
-    if args.rule:
-        print(f"🔍 查詢給付規定: '{args.rule}'")
-        res = bridge.get_payment_rules(args.rule, limit=2)
-        if res:
-            for r in res:
-                print(f"  [{r['rule_id']}] {r['item_name']} ({r['section_code']})")
-                print(f"   內容: {r['rule_content'][:80]}...")
-        else:
-            print("  (未查詢到條文或 tw-med-db 未啟用)")
-    print("=" * 60)
+        elif cmd == "search":
+            target = stdin_data if stdin_data else args.query
+            if not target:
+                log_msg("未提供搜尋關鍵字", "WARN")
+                return
+            res = bridge.search_drugs(target, limit=args.limit)
+            if args.json:
+                sys.stdout.write(json.dumps(res, ensure_ascii=False, separators=(',', ':')) + "\n")
+            elif args.quiet:
+                for item in res:
+                    sys.stdout.write(f"{item['drug_code']}\t{item['trade_name_tw']}\n")
+            else:
+                sys.stdout.write(f"🔍 搜尋藥品關鍵字: '{target}' (共 {len(res)} 筆)\n")
+                for item in res:
+                    sys.stdout.write(f"  [{item['drug_code']}] {item['trade_name_tw']} ({item['trade_name_en']}) - NT$ {item['nhi_price']}\n")
+
+        elif cmd == "code":
+            target = stdin_data if stdin_data else args.code_str
+            if not target:
+                log_msg("未提供代碼", "WARN")
+                return
+            res = bridge.translate_clinical_code(target)
+            if args.json:
+                sys.stdout.write(json.dumps(res or {}, ensure_ascii=False, separators=(',', ':')) + "\n")
+            elif args.quiet:
+                if res:
+                    sys.stdout.write(f"{res['code']}\t{res['title']}\n")
+            else:
+                sys.stdout.write(f"🔍 翻譯臨床代碼: '{target}'\n")
+                if res:
+                    sys.stdout.write(f"  類別: {res['type']}\n")
+                    sys.stdout.write(f"  名稱: {res['title']}\n")
+                    sys.stdout.write(f"  說明: {res['description']}\n")
+                    sys.stdout.write(f"  來源: {res['source']}\n")
+                else:
+                    sys.stdout.write("  (未命中代碼或 tw-med-db 未啟用)\n")
+
+        elif cmd == "rule":
+            target = stdin_data if stdin_data else args.rule_query
+            if not target:
+                log_msg("未提供給付條文關鍵字", "WARN")
+                return
+            res = bridge.get_payment_rules(target, limit=args.limit)
+            if args.json:
+                sys.stdout.write(json.dumps(res, ensure_ascii=False, separators=(',', ':')) + "\n")
+            elif args.quiet:
+                for r in res:
+                    sys.stdout.write(f"{r['rule_id']}\t{r['item_name']}\n")
+            else:
+                sys.stdout.write(f"🔍 查詢給付規定: '{target}' (共 {len(res)} 筆)\n")
+                for r in res:
+                    sys.stdout.write(f"  [{r['rule_id']}] {r['item_name']} ({r['section_code']})\n")
+                    sys.stdout.write(f"   內容: {r['rule_content'][:80]}...\n")
+
+        elif cmd == "schema":
+            sys.stdout.write(json.dumps(get_schema(), ensure_ascii=False, indent=2) + "\n")
+
+        elif cmd == "version":
+            ver_info = {
+                "script": "tw_med_bridge.py",
+                "version": "1.0.0",
+                "cgs_spec_version": __cli_spec_version__
+            }
+            if args.json:
+                sys.stdout.write(json.dumps(ver_info, ensure_ascii=False) + "\n")
+            else:
+                sys.stdout.write(f"tw_med_bridge.py v1.0.0 (CGS v{__cli_spec_version__})\n")
+
+        elif cmd in ["man", "manual"]:
+            if os.path.exists(MANUAL_PATH):
+                with open(MANUAL_PATH, "r", encoding="utf-8") as f:
+                    sys.stdout.write(f.read())
+            else:
+                log_msg(f"說明手冊不存在: {MANUAL_PATH}", "ERROR")
+
+    except Exception as e:
+        log_msg(str(e), "ERROR")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
