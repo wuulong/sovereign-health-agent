@@ -19,6 +19,15 @@ import urllib.parse
 from datetime import datetime
 import re
 
+# 匯入 tw-med-db 邊界適配器 (具備三級開關與平滑降級)
+try:
+    from utils.tw_med_bridge import get_med_bridge
+except ImportError:
+    try:
+        from tw_med_bridge import get_med_bridge
+    except ImportError:
+        get_med_bridge = None
+
 # 醫療免責聲明 (剛性輸出)
 DISCLAIMER = """
 ======================================================================
@@ -276,15 +285,43 @@ def query_drug(db_path, query_str):
             
     # 輸出衛教庫內容
     if edu_rows:
-        print(f"\n📖 【本地藥理衛教與日常照護指引】:")
-        for edu in edu_rows:
-            title, content, citations = edu
-            print(f"📌 {title}")
-            print("-" * 60)
-            print(content)
-            print("-" * 60)
-            print(f"📚 出處: {citations}\n")
+        print(f"\n📚 【衛教庫收錄之藥物說明】(共 {len(edu_rows)} 筆):")
+        for row in edu_rows:
+            title, content, citations = row
+            print(f"📌 【藥物衛教】: {title}")
+            print(f"📄 【說明內容】: {content}")
+            print(f"📚 【文獻依據】: {citations}")
+            print("-" * 50)
             
+    # c. 若 tw-med-db 可用，融合全台 6.6 萬筆官方藥證與健保價大數據
+    if get_med_bridge:
+        bridge = get_med_bridge()
+        if bridge.is_available():
+            db_drugs = bridge.search_drugs(query_str, limit=3)
+            if db_drugs:
+                print(f"\n🇹🇼 【台灣醫療大數據庫 (tw-med-db) 官方藥證與健保核定】(共 {len(db_drugs)} 筆):")
+                print(f"{'健保代碼/許可證':<16} | {'中文藥名':<20} | {'英文藥名':<25} | {'健保價':<10}")
+                print("-" * 80)
+                for d in db_drugs:
+                    price_str = f"NT$ {d['nhi_price']}" if d.get('nhi_price') is not None else "自費/未核定"
+                    code_id = d.get('drug_code') or d.get('license_id') or "N/A"
+                    print(f"{code_id:<16} | {d['trade_name_tw'][:18]:<20} | {d['trade_name_en'][:23]:<25} | {price_str:<10}")
+                    if d.get("ingredient_name"):
+                        print(f"   🧬 主成分: {d['ingredient_name']}")
+                    if d.get("indications"):
+                        print(f"   📋 適應症: {d['indications'][:80]}...")
+                    print("-" * 80)
+
+    # 如果兩者都沒有，提供防幻覺連結
+    if not med_requests and not edu_rows and (not get_med_bridge or not get_med_bridge().is_available() or not db_drugs):
+        print(f"⚠️  查無任何與 '{query_str}' 相關的用藥記錄或官方資料。")
+        tfda_url = f"https://www.fda.gov.tw/MLMS/H0001D.aspx?licid={urllib.parse.quote(query_str)}"
+        nhi_url = f"https://www.nhi.gov.tw/"
+        print(f"💡 建議您直接前往官方資料庫進行實時查證:")
+        print(f"🔗 TFDA 藥品許可證查詢: {tfda_url}")
+        print(f"🔗 健保署健保用藥給付標準查詢: {nhi_url}")
+        return
+        
     # 組裝外部查證連結
     pubmed_url = f"https://pubmed.ncbi.nlm.nih.gov/?term={urllib.parse.quote(query_str)}"
     tfda_url = f"https://www.fda.gov.tw/MLMS/H0001.aspx"
@@ -462,7 +499,26 @@ def translate_code(query_str):
     """5. 翻譯 LOINC 或健保藥品代碼"""
     print(f"\n🔍 正在進行臨床代碼對照與翻譯: '{query_str}'...")
     
-    # 模糊匹配 CODE_DICT
+    # a. 優先嘗試 tw-med-db 大數據庫翻譯 (M12 LOINC 檢驗碼 或 M01 藥品許可證)
+    if get_med_bridge:
+        bridge = get_med_bridge()
+        if bridge.is_available():
+            trans = bridge.translate_clinical_code(query_str)
+            if trans:
+                print(f"✨ 成功從【{trans['source']}】精確對照代碼:\n")
+                print(f"🔖 【代碼】: {trans['code']}")
+                print(f"🏷  【類別】: {trans['type']}")
+                print(f"📝 【標準名稱】: {trans['title']}")
+                print(f"📋 【詳細說明】: {trans['description']}")
+                if "LOINC" in trans["type"]:
+                    print(f"🔗 官方 LOINC 實時查證: https://loinc.org/{trans['code']}")
+                else:
+                    print(f"🔗 健保用藥給付標準查詢: https://www.nhi.gov.tw/")
+                print()
+                print(DISCLAIMER)
+                return
+
+    # b. 平滑降級 (Graceful Fallback)：檢索本地 CODE_DICT (clinical_codes.json / FALLBACK_CODE_DICT)
     matched = []
     for code, desc in CODE_DICT.items():
         if query_str.lower() in code.lower() or query_str in desc:
@@ -481,7 +537,7 @@ def translate_code(query_str):
             print(f"🔗 TFDA 藥品查詢網址: {tfda_url}")
         return
         
-    print(f"✨ 找到 {len(matched)} 筆代碼對照結果:\n")
+    print(f"✨ 找到 {len(matched)} 筆代碼對照結果 (來源: 本地離線字典備援):\n")
     for code, desc in matched:
         print(f"🔖 【代碼】: {code}")
         print(f"📝 【中文定義與臨床意義】: {desc}")
@@ -498,10 +554,21 @@ def run_interactive(db_path, data_root):
     """對話式互動選單主迴圈"""
     while True:
         print("\n" + "=" * 65)
-        print("    蓬萊本地主權健康查證與防防幻覺工具箱 (SHVT)")
+        print("    蓬萊本地主權健康查證與防幻覺工具箱 (SHVT)")
         print("=" * 65)
         print(f"  📂 【當前個人資料庫】: {db_path}")
         print(f"  📂 【當前原始檔案庫】: {deidentify_text(data_root)}")
+        
+        # 顯示 tw-med-db 醫療大數據庫連線狀態
+        if get_med_bridge:
+            bridge = get_med_bridge()
+            if bridge.is_available():
+                print(f"  🇹🇼 【醫療大數據庫】: 🟢 已連線 (tw-med-db 7.8萬筆實體數據)")
+            else:
+                print(f"  🇹🇼 【醫療大數據庫】: ⚪ 未啟用/未連線 ({bridge.get_status()['status_message']})")
+        else:
+            print(f"  🇹🇼 【醫療大數據庫】: ⚪ 未安裝適配器 (採用本地字典備援)")
+
         print("-" * 65)
         print("  1. 查詢疾病衛教與臨床指引 (Disease & Guidelines)")
         print("  2. 查詢個人歷史用藥變更與藥物說明 (Medications)")
@@ -521,7 +588,7 @@ def run_interactive(db_path, data_root):
             if query:
                 query_disease(db_path, query)
         elif choice == '2':
-            query = input("💬 請輸入要查詢的藥物名稱 (如: Entecavir / 得利生): ").strip()
+            query = input("💬 請輸入要查詢的藥物名稱 (如: Entecavir / 得利生 / 萬科): ").strip()
             if query:
                 query_drug(db_path, query)
         elif choice == '3':
@@ -533,7 +600,7 @@ def run_interactive(db_path, data_root):
             if query:
                 query_indicator(db_path, query)
         elif choice == '5':
-            query = input("💬 請輸入欲查詢之 LOINC 或健保代碼 (如: 89555-7): ").strip()
+            query = input("💬 請輸入欲查詢之 LOINC 或健保代碼 (如: 1001-2 / 89555-7 / BC12601100): ").strip()
             if query:
                 translate_code(query)
         elif choice == '6':
@@ -549,10 +616,19 @@ def main():
     parser.add_argument("-c", "--code", type=str, help="翻譯並查證常用臨床代碼 (如: 89555-7 / BC12601100)")
     parser.add_argument("-l", "--lab", type=str, help="查詢臨床指標歷史趨勢與住院對齊 (如: WBC / Platelet)")
     parser.add_argument("-i", "--interactive", action="store_true", help="啟動終端互動選單模式")
-    parser.add_argument("--db", type=str, help="指定自訂 SQLite 資料庫路徑")
+    parser.add_argument("--db", type=str, help="指定自訂 SQLite 個人健康資料庫路徑")
+    parser.add_argument("--no-med-db", action="store_true", help="強制停用 tw-med-db 醫療大數據庫 (切換為純本地備援字典模式)")
+    parser.add_argument("--with-med-db", action="store_true", help="強制嘗試啟用 tw-med-db 醫療大數據庫")
     
     args = parser.parse_args()
     
+    # 處理 tw-med-db 旗標開關覆蓋
+    if get_med_bridge:
+        if args.no_med_db:
+            get_med_bridge(force_enabled=False)
+        elif args.with_med_db:
+            get_med_bridge(force_enabled=True)
+
     # 智慧型尋找資料庫與數據路徑
     db_path, data_root = get_db_and_data_paths(args.db)
     

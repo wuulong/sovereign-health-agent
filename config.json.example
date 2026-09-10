@@ -1,0 +1,5 @@
+{
+  "enable_tw_med_db": true,
+  "tw_med_db_path": null,
+  "comment": "tw_med_db 為可選增強模組。設為 false 或路徑不存在時自動安全平滑降級。"
+}

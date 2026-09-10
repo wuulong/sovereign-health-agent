@@ -11,7 +11,7 @@
 
 大語言模型雖具備良好的醫學常識與語意理解能力，但在面對個人就醫細節時，極易因字元錯位或時間線混亂而產生「幻覺」（例如誤記檢驗指標變化日期、虛構並未使用的藥物）。
 
-**SHVT 工具箱** 採取 100% 本地端、離線、確定性 SQL 運算與實體原始病歷檢索，作為個人健康的「剛性防線」。在您使用 AI 進行病況整理與分析前，可隨時透過本工具進行雙向查核，保障資料準確無誤。本手冊以系統預設之去識別化範本作為功能示範，確保病患就醫隱私安全。
+**SHVT 工具箱** 採取 100% 本地端、離線、確定性 SQL 運算與實體原始病歷檢索，作為個人健康的「硬性防線」。在您使用 AI 進行病況整理與分析前，可隨時透過本工具進行雙向查核，保障資料準確無誤。本手冊以系統預設之去識別化範本作為功能示範，確保病患就醫隱私安全。
 
 ---
 
@@ -30,7 +30,7 @@
   2. 查詢個人歷史用藥變更與藥物說明 (Medications)
   3. 查詢醫師/醫院就醫報告與原始檔案溯源 (Doctors & Reports)
   4. 查詢常用臨床指標歷史趨勢與住院對齊 (Lab Indicators)
-  5. 翻譯 LOINC 或健保藥物代碼 (Clinical Code Translator)
+  5. 翻譯 LOINC 或健保藥物程式碼 (Clinical Code Translator)
   6. 顯示系統免責聲明 (Disclaimer)
   Q. 離開工具箱 (Quit)
 =================================================================
@@ -38,9 +38,9 @@
 ```
 
 ### 📋 簡易操作步驟：
-1. 輸入 **`2`** 進入藥物查詢，接著輸入您想查證的藥物名稱（例如：`Entecavir` ），即可查閱該藥的臨床用藥歷史與對合健保碼。
-2. 輸入 **`4`** 進入檢驗指標查詢，接著輸入指標代碼（例如：`WBC`），即可完整瀏覽該指標的歷史軌跡及對合住院狀態。
-3. 輸入 **`3`** 進入醫師溯源，輸入醫師代碼或工號，便能查證其所負責之住院歷程，並取得去識別化之原始出處片段。
+1. 輸入 **`2`** 進入藥物查詢，接著輸入您想查證的藥物名稱（例如：`Entecavir` ），即可查閱該藥的臨床用藥歷史與對照整合健保碼。
+2. 輸入 **`4`** 進入檢驗指標查詢，接著輸入指標程式碼（例如：`WBC`），即可完整瀏覽該指標的歷史軌跡及對照整合住院狀態。
+3. 輸入 **`3`** 進入醫師溯源，輸入醫師程式碼或工號，便能查證其所負責之住院歷程，並取得去識別化之原始出處片段。
 4. 輸入 **`Q`** 即可退出工具箱，返回主對話。
 
 ---
@@ -60,20 +60,83 @@ python3 utils/health_query_tool.py [選項]
 | :--- | :--- | :--- | :--- |
 | **`-i`** | `--interactive` | 啟動互動式終端對話選單（無任何參數時的預設模式）。 | `python3 utils/health_query_tool.py -i` |
 | **`-d`** | `--disease` | 模糊查詢本機預載之疾病衛教說明與臨床指引。 | `python3 utils/health_query_tool.py -d 多發性骨髓瘤` |
-| **`-m`** | `--drug` | 模糊查詢個人用藥歷史變更軌跡，並比對衛教庫。 | `python3 utils/health_query_tool.py -m Entecavir` |
+| **`-m`** | `--drug` | 查詢個人歷史處方，並動態融合 `tw-med-db` 全台藥證與健保價。 | `python3 utils/health_query_tool.py -m 萬科` |
 | **`-p`** | `--doctor` | 依醫師代號或關鍵字追溯所有關聯之就醫住院事件。 | `python3 utils/health_query_tool.py -p H01180` |
 | **`-l`** | `--lab` | 查詢個人臨床檢驗指標歷史趨勢，自動與住院事件對齊。 | `python3 utils/health_query_tool.py -l WBC` |
-| **`-c`** | `--code` | 翻譯並查詢常用的臨床代碼（如 LOINC 或健保代碼）。 | `python3 utils/health_query_tool.py -c 89555-7` |
+| **`-c`** | `--code` | 翻譯臨床程式碼（優先查詢 `tw-med-db` LOINC/健保碼，平滑降級至本地字典）。 | `python3 utils/health_query_tool.py -c 1001-2` |
+| **`--no-med-db`** | | 強制停用外部醫療大資料庫，切換為純本地離線字典模式。 | `python3 utils/health_query_tool.py --no-med-db -c 89555-7` |
+| **`--with-med-db`**| | 強制嘗試啟用外部醫療大資料庫。 | `python3 utils/health_query_tool.py --with-med-db` |
 | **`--db`** | | 指定要讀取的自訂 SQLite 資料庫物理路徑。 | `python3 utils/health_query_tool.py --db db/template.db` |
 
 ---
 
-### 🧬 四大核心離線查證機制說明
+### 🧬 四大核心離線查證機制說明 (含 tw-med-db 醫療大資料融合)
 
 1. **疾病與指南查詢（-d / --disease）**：直接模糊檢索本機 SQLite 中的 `MY_EDUCATION_BASE`（衛教庫）並印出。結尾自動拼裝產生該疾病在 PubMed 上的 Guidelines 搜尋連結，引導病患直接查閱最新文獻，避免被模型舊記憶誤導。
-2. **個人用藥歷史差分與防幻覺提示（-m / --drug）**：通用地遍歷個人歷程表中所有的 `MedicationRequest` 資源，依時間排序展現「劑量演變與目前狀態」。若本機資料庫查無活性處方，系統會提供對合提醒，說明該藥物可能已停用，防止模型幻覺誤導服藥。
+2. **個人用藥歷史差分與大資料藥證對照（-m / --drug）**：通用地遍歷個人歷程表中所有的 `MedicationRequest` 資源，依時間排序展現「劑量演變與目前狀態」。若環境中配置並啟用了 `tw-med-db`，系統將自動秒級檢索全台 6.6 萬筆官方藥品許可證，同步補充呈現健保程式碼、最新付款價格、有效主成分與核定適應症；若未啟用則平滑回退至純個人歷程模式。
 3. **醫師與原始病歷檔案溯源（-p / --doctor）**：在去識別化原始病歷（`data/raw/`）中進行全文關鍵字檢索。一旦發現匹配，系統會透過 SQL Join `artifact_id`，找出對應之就醫事件 `Encounter`，印出醫師所屬住院區間與去識別化的原始檔案名稱、路徑與前後文字片段。
 4. **檢驗指標歷史與就醫住院時間軸對齊（-l / --lab）**：查詢數值時，系統除列出時間趨勢外，會自動將每一筆檢驗日期與所有的住院區間進行交集比對（`Encounter.period.start <= Obs.date <= Encounter.period.end`），並在右方自動標註 `🏥 住院期間` 提醒。
+5. **臨床程式碼雙軌翻譯（-c / --code）**：優先查詢 `tw-med-db` 醫療大資料庫（涵蓋完整 LOINC 檢驗碼與 TFDA 藥證清單）；若未安裝或未啟用該庫，系統將自動且 100% 靜默平滑降級至本地精簡字典（`clinical_codes.json` 與內建備援），保證查詢體驗不中斷。
+
+---
+
+### 🌉 醫療大資料橋接器 (tw_med_bridge.py) 開發與調用指引
+
+為了達成「外部醫療大資料庫 (tw-med-db) 與本地個人資料庫 (PHR) 徹底物理隔離，且環境無此資料庫時零崩潰降級」的系統工程目標，系統將所有與 `tw-med-db` 相關的讀取封裝於獨立模組 `utils/tw_med_bridge.py` 中。
+
+#### 1. 三級開關設定優先權
+系統依下列順序判定是否啟用 `tw-med-db`：
+1. **CLI 命令列旗標**：`--no-med-db`（強制關閉）或 `--with-med-db`（強制開啟）。
+2. **環境變數**：`ENABLE_TW_MED_DB=0`（關閉）或 `ENABLE_TW_MED_DB=1`（開啟），亦可指定路徑 `TW_MED_DB_PATH="/path/to/med.db"`。
+3. **專案設定檔 (`config.json`)**：
+   ```json
+   {
+     "enable_tw_med_db": true,
+     "tw_med_db_path": null
+   }
+   ```
+4. **預設自動尋找**：若路徑為 `null`，自動探測專案外部之相對路徑（如 `../../events/TDHI_haba/med-db-in/tw-med-db/db/med.db`）。
+
+#### 2. 自我診斷與測試命令 (CLI)
+開發者或技術家屬可直接於終端機測試 Bridge 的連線與檢索狀態：
+```bash
+# 檢查目前 tw-med-db 連線狀態
+python3 utils/tw_med_bridge.py
+
+# 測試關鍵字藥物搜尋 (FTS5 / LIKE)
+python3 utils/tw_med_bridge.py -s "萬科"
+
+# 測試臨床程式碼反查 (LOINC 或許可證)
+python3 utils/tw_med_bridge.py -c "1001-2"
+
+# 模擬無 tw-med-db 環境下的安全降級測試
+python3 utils/tw_med_bridge.py --no-med-db -s "萬科"
+```
+
+#### 3. Python 程式碼直接調用 (API)
+在自訂腳本或擴充代理人功能時，可直接 import 使用：
+```python
+from utils.tw_med_bridge import get_med_bridge
+
+# 取得單例 Bridge 實例
+bridge = get_med_bridge()
+
+if bridge.is_available():
+    # 1. 搜尋藥物
+    drugs = bridge.search_drugs("Velcade", limit=3)
+    
+    # 2. 依健保碼或許可證字號精確查詢
+    drug_detail = bridge.get_drug_by_code("DHA00202451009")
+    
+    # 3. 翻譯臨床檢驗程式碼 (LOINC)
+    loinc_info = bridge.translate_clinical_code("1001-2")
+    
+    # 4. 查詢健保給付規定條文
+    rules = bridge.get_payment_rules("抗高血糖")
+else:
+    # 平滑降級邏輯 (Fallback)
+    print("tw-med-db 未啟用或未安裝，自動採用本地備援機制")
+```
 
 </details>
 
@@ -81,5 +144,5 @@ python3 utils/health_query_tool.py [選項]
 
 ## 🔒 3. 隱私防護與免責防線
 
-1. **去識別化防禦**：本工具箱在終端印出任何敏感資料（如病歷原始內容、就醫紀錄）時，會自動調用遮蔽正則，將身分證字號、姓名等遮蔽（例如：`王○明`），避免旁人窺視。手冊文件與範本亦遵循此原則，不透露任何真實病患細節。
-2. **免責剛性聲明**：每一次執行查詢時，系統尾部均會強制印出台灣繁體中文的「醫療免責聲明」，提醒使用者任何用藥變更與臨床決策應向專業主治醫師諮詢，守護醫病溝通的安全邊界。
+1. **去識別化防禦**：本工具箱在終端印出任何敏感資料（如病歷原始內容、就醫紀錄）時，會自動調用遮蔽正則，將身分證字號、姓名等遮蔽（例如：`王○明`），避免旁人窺視。手冊檔案與範本亦遵循此原則，不透露任何真實病患細節。
+2. **免責硬性聲明**：每一次執行查詢時，系統尾部均會強制印出台灣繁體中文的「醫療免責聲明」，提醒使用者任何用藥變更與臨床決策應向專業主治醫師諮詢，守護醫病溝通的安全邊界。

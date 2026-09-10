@@ -9,14 +9,29 @@ import sqlite3
 import argparse
 from datetime import datetime
 
-# Import Playwright dynamically to show installation instruction if missing
+# 匯入 tw-med-db 邊界適配器 (支援開關控制與離線大數據查證)
 try:
-    from playwright.sync_api import sync_playwright
+    from utils.tw_med_bridge import get_med_bridge
 except ImportError:
-    print("【錯誤】未偵測到 playwright 套件。請在 terminal 執行以下指令進行安裝：")
-    print("       pip install playwright")
-    print("       playwright install chromium")
-    sys.exit(1)
+    try:
+        from tw_med_bridge import get_med_bridge
+    except ImportError:
+        get_med_bridge = None
+
+sync_playwright = None
+def ensure_playwright():
+    """需要線上爬蟲時才動態載入 Playwright"""
+    global sync_playwright
+    if sync_playwright is None:
+        try:
+            from playwright.sync_api import sync_playwright as _sp
+            sync_playwright = _sp
+        except ImportError:
+            print("【錯誤】未偵測到 playwright 套件。請在 terminal 執行以下指令進行安裝：")
+            print("       pip install playwright")
+            print("       playwright install chromium")
+            sys.exit(1)
+    return sync_playwright
 
 # Default Database Path (Dynamically resolved based on profile in main)
 
@@ -54,13 +69,14 @@ def fetch_drug_data(nhi_code=None, lic_id=None, verbose=False):
     """
     透過 Playwright 在無頭瀏覽器中查詢食藥署許可證並攔截 API 資料
     """
+    sp = ensure_playwright()
     search_url = "https://lmspiq.fda.gov.tw/web/DRPIQ/DRPIQLicSearch"
     result_base_url = "https://lmspiq.fda.gov.tw/web/DRPIQ/DRPIQ1000Result"
     
     detail_data = None
     search_api_response = None
     
-    with sync_playwright() as p:
+    with sp() as p:
         browser = p.chromium.launch(headless=True)
         # 建立一個有設定常用 user-agent 的 context
         context = browser.new_context(
@@ -352,7 +368,36 @@ def main():
     print(f"   💾 資料庫: {db_path}")
     print("==================================================")
     
-    # 執行 Playwright 查詢
+    # 優先嘗試 tw-med-db 本地大數據庫秒級離線查驗 (免除 Playwright 爬蟲延遲與依賴)
+    query_target = args.nhi_code or lic_param
+    if get_med_bridge:
+        bridge = get_med_bridge()
+        if bridge.is_available() and query_target:
+            local_drug = bridge.get_drug_by_code(query_target)
+            if not local_drug:
+                # 嘗試 search
+                search_res = bridge.search_drugs(query_target, limit=1)
+                if search_res:
+                    local_drug = search_res[0]
+
+            if local_drug:
+                print("\n⚡ 【已命中本地台灣醫療大數據庫 (tw-med-db)，採用亞毫秒級離線直讀】")
+                print(f"📌 【藥物中文名】: {local_drug.get('trade_name_tw')}")
+                print(f"📌 【藥物英文名】: {local_drug.get('trade_name_en')}")
+                print(f"📋 【許可證字號】: {local_drug.get('license_id', 'N/A')}")
+                print(f"🧬 【有效主成分】: {local_drug.get('ingredient_name')}")
+                print(f"💰 【健保核定價】: NT$ {local_drug.get('nhi_price', 0.0)}")
+                print(f"💊 【劑型外觀】: {local_drug.get('form_description', '未註明')}")
+                print(f"🩺 【核定適應症】: {local_drug.get('indications')}")
+                print("-" * 50)
+                print("🔗 外部官方實時查證: https://www.fda.gov.tw/MLMS/H0001.aspx")
+                print("==================================================")
+                print("   🎉 本地離線大數據查驗完成！")
+                print("==================================================")
+                return
+
+    # 若本地未啟用或未命中，平滑回退至 Playwright 線上查詢
+    print("[*] 正在透過 Playwright 進行線上衛教資料查詢...")
     try:
         raw_data = fetch_drug_data(nhi_code=args.nhi_code, lic_id=lic_param, verbose=args.verbose)
     except Exception as e:
