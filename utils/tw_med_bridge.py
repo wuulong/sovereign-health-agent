@@ -40,9 +40,10 @@ PROJECT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 MANUAL_PATH = os.path.join(PROJECT_DIR, "manuals", "tw_med_bridge.md")
 
-# 預設候選 tw-med-db 路徑 (依相對位置探索)
+# 預設候選 tw-med-db 路徑 (優先探索外接硬碟預設路徑與相對位置)
 CANDIDATE_MED_DB_PATHS = [
     os.path.abspath(os.path.join(PROJECT_DIR, "..", "..", "events", "TDHI_haba", "med-db-in", "tw-med-db", "db", "med.db")),
+    "/Volumes/D2024/data/med-db-in/db/med.db",
     os.path.abspath(os.path.join(PROJECT_DIR, "..", "tw-med-db", "db", "med.db")),
     os.path.abspath(os.path.join(PROJECT_DIR, "med.db")),
 ]
@@ -71,11 +72,17 @@ class TwMedBridge:
         else:
             self.enabled = self.config_enabled
 
-        # 路徑判定
+        # 路徑判定 (支援 TW_MED_DB_PATH, MED_DB_PATH, MOHW_DB_PATH)
+        env_db_path = (
+            os.environ.get("TW_MED_DB_PATH")
+            or os.environ.get("MED_DB_PATH")
+            or os.environ.get("MOHW_DB_PATH")
+        )
+
         if custom_db_path:
             self.db_path = custom_db_path
-        elif os.environ.get("TW_MED_DB_PATH"):
-            self.db_path = os.environ.get("TW_MED_DB_PATH")
+        elif env_db_path:
+            self.db_path = env_db_path
         elif self.config_db_path:
             self.db_path = self.config_db_path
         else:

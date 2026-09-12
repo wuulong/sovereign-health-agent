@@ -1,0 +1,150 @@
+direction: right
+title: "Sovereign Health Agent (SHA) × tw-med-db 協作與邊界防禦架構" {
+  near: top-center
+  shape: text
+  style.font-size: 26
+  style.bold: true
+}
+
+# -------------------------------------------------------------
+# 1. 病患個人主權域 (Patient Sovereign Realm)
+# -------------------------------------------------------------
+sha_realm: "病患個人主權域 (SHA Realm)" {
+  style: {
+    fill: "#f8fafc"
+    stroke: "#334155"
+    stroke-width: 2
+    stroke-dash: 0
+  }
+
+  ui_layer: "終端使用者 / 臨床助理" {
+    shape: person
+    style.fill: "#e2e8f0"
+  }
+
+  agent: "主權健康代理人 (patient_agent.py)\n[ReAct Loop / 意圖路由]" {
+    shape: rectangle
+    style.fill: "#dbeafe"
+    style.stroke: "#2563eb"
+    style.bold: true
+  }
+
+  toolbox: "SHVT 臨床工具箱 (health_query_tool.py)\n[藥物反查 / LOINC 翻譯 / 給付比對]" {
+    shape: rectangle
+    style.fill: "#eff6ff"
+    style.stroke: "#3b82f6"
+  }
+
+  med_cli: "用藥查詢指令 (medication_query.py)\n[離線毫秒級響應優先]" {
+    shape: rectangle
+    style.fill: "#eff6ff"
+    style.stroke: "#3b82f6"
+  }
+
+  phr_db: "個人病歷資料庫\n(fv_patient_personal.db)\n• HL7 FHIR R4 資源架構\n• 100% 實體物理隔離\n• 本地私密儲存" {
+    shape: cylinder
+    style.fill: "#fef3c7"
+    style.stroke: "#d97706"
+    style.bold: true
+  }
+
+  ui_layer -> agent: "下達健康諮詢與處方分析指令"
+  agent -> toolbox: "調用臨床工具 (SHVT)"
+  agent -> med_cli: "直接用藥核對"
+  toolbox -> phr_db: "讀寫個人檢驗與就醫紀錄"
+  med_cli -> phr_db: "比對個人用藥清單"
+}
+
+# -------------------------------------------------------------
+# 2. 邊界適配層與動態開關 (Sidecar Bridge & Toggle)
+# -------------------------------------------------------------
+bridge_realm: "邊界適配層 (Sidecar Bridge)" {
+  style: {
+    fill: "#fdf4ff"
+    stroke: "#a21caf"
+    stroke-width: 2
+    stroke-dash: 3
+  }
+
+  bridge: "醫療大數據適配器\n(utils/tw_med_bridge.py)\n[CGS v2.4 合規 / Pipeline-Native]" {
+    shape: hexagon
+    style.fill: "#fae8ff"
+    style.stroke: "#86198f"
+    style.bold: true
+  }
+
+  toggle_ctrl: "三級開關覆蓋決策 (Priority Logic)\n1. CLI: --no-med-db\n2. ENV: ENABLE_TW_MED_DB\n3. CONFIG: config.json\n4. PATH: ../tw-med-db/db/med.db" {
+    shape: rectangle
+    style.fill: "#f5d0fe"
+    style.stroke: "#c026d3"
+  }
+
+  fallback_engine: "安全降級引擎 (Safe Fallback)\n• 靜態代碼: clinical_codes.json\n• 雲端備援: FDA / NHI 線上備援\n• 零阻斷: 降級警示不崩潰" {
+    shape: rectangle
+    style.fill: "#ffe4e6"
+    style.stroke: "#e11d48"
+  }
+
+  bridge -> toggle_ctrl: "探測連線狀態"
+  toggle_ctrl -> fallback_engine: "若開關關閉或 DB 不存在"
+}
+
+# -------------------------------------------------------------
+# 3. 台灣醫療開放大數據域 (tw-med-db Realm)
+# -------------------------------------------------------------
+med_realm: "台灣醫療開放大數據 (tw-med-db Realm)" {
+  style: {
+    fill: "#f0fdf4"
+    stroke: "#15803d"
+    stroke-width: 2
+  }
+
+  med_db: "地端唯讀醫療資料庫\n(db/med.db - 522MB)\n• SQLite FTS5 全文檢索\n• URI: file:...mode=ro (唯讀保護)\n• 嚴禁寫入任何病患隱私" {
+    shape: cylinder
+    style.fill: "#dcfce7"
+    style.stroke: "#16a34a"
+    style.bold: true
+  }
+
+  modules: "核心醫學模組庫 (23 大模組)\n• M01 藥品許可證與健保代碼 (41萬筆)\n• M02 主成分與 ATC 系統分類\n• M06 健保給付規定條文 (全文檢索)\n• M12 LOINC 檢驗醫令標準碼\n• M09 全球癌症臨床試驗與標靶\n• M53 WHO ATC 官方階層樹狀體系" {
+    shape: rectangle
+    style.fill: "#bbf7d0"
+    style.stroke: "#22c55e"
+  }
+
+  med_db -> modules: "提供結構化視圖與 FTS5 索引"
+}
+
+# -------------------------------------------------------------
+# 跨域調用與隔離邊界連線 (Cross-Realm Connections)
+# -------------------------------------------------------------
+sha_realm.toolbox -> bridge_realm.bridge: "1. 請求公共醫學查詢\n(藥證 / 給付規定 / LOINC)" {
+  style.stroke: "#7c3aed"
+  style.stroke-width: 2
+}
+
+sha_realm.med_cli -> bridge_realm.bridge: "1. 藥物成分反查" {
+  style.stroke: "#7c3aed"
+  style.stroke-width: 2
+}
+
+bridge_realm.bridge -> med_realm.med_db: "2. 毫秒級唯讀查詢 (URI: mode=ro)\n【純公共知識，零個人資訊回傳】" {
+  style.stroke: "#16a34a"
+  style.stroke-width: 3
+}
+
+bridge_realm.fallback_engine -> sha_realm.toolbox: "離線靜態回傳 (Fallback Result)" {
+  style.stroke: "#e11d48"
+  style.stroke-dash: 4
+}
+
+# -------------------------------------------------------------
+# 架構說明與防禦原則標註
+# -------------------------------------------------------------
+legend: "架構安全與解耦核心原則\n──────────────────────────────────────────\n1. 實體物理隔離：tw-med-db 為獨立專案，不包含任何病患個資。\n2. 唯讀唯安：SHA 透過 URI mode=ro 唯讀存取，底層硬性防止資料庫被污染。\n3. 三級彈性：無論是否安裝 tw-med-db，SHA 皆可藉由降級引擎維持運作。\n4. 雙語翻譯器：LOINC 與健保代碼在適配層即時轉換，串接國際 FHIR R4 與在地健保體系。" {
+  near: bottom-center
+  shape: callout
+  style.fill: "#f1f5f9"
+  style.stroke: "#64748b"
+  style.font-size: 14
+}

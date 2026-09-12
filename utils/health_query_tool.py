@@ -617,6 +617,7 @@ def main():
     parser.add_argument("-l", "--lab", type=str, help="查詢臨床指標歷史趨勢與住院對齊 (如: WBC / Platelet)")
     parser.add_argument("-i", "--interactive", action="store_true", help="啟動終端互動選單模式")
     parser.add_argument("--db", type=str, help="指定自訂 SQLite 個人健康資料庫路徑")
+    parser.add_argument("--status", action="store_true", help="檢查並顯示資料庫與 tw-med-db 醫療大數據連線診斷狀態")
     parser.add_argument("--no-med-db", action="store_true", help="強制停用 tw-med-db 醫療大數據庫 (切換為純本地備援字典模式)")
     parser.add_argument("--with-med-db", action="store_true", help="強制嘗試啟用 tw-med-db 醫療大數據庫")
     
@@ -632,6 +633,26 @@ def main():
     # 智慧型尋找資料庫與數據路徑
     db_path, data_root = get_db_and_data_paths(args.db)
     
+    # 若請求狀態檢查
+    if args.status:
+        print("\n" + "=" * 65)
+        print("    蓬萊本地主權健康查證與防幻覺工具箱 (SHVT) - 狀態診斷")
+        print("=" * 65)
+        print(f"  📂 【個人資料庫】: {db_path} ({'存在' if os.path.exists(db_path) else '未找到'})")
+        print(f"  📂 【原始檔案庫】: {deidentify_text(data_root)}")
+        if get_med_bridge:
+            bridge = get_med_bridge()
+            if bridge.is_available():
+                print(f"  🇹🇼 【醫療大數據庫】: 🟢 已連線 (tw-med-db)")
+                print(f"      實體路徑: {bridge.db_path}")
+            else:
+                st = bridge.get_status()
+                print(f"  🇹🇼 【醫療大數據庫】: ⚪ 未啟用/未連線 ({st.get('status_message')})")
+        else:
+            print(f"  🇹🇼 【醫療大數據庫】: ⚪ 未安裝適配器 (採用本地字典備援)")
+        print("=" * 65 + "\n")
+        return
+
     # 如果有輸入參數，就執行對應查詢
     if args.disease:
         query_disease(db_path, args.disease)
