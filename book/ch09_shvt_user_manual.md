@@ -56,27 +56,47 @@
 python3 utils/health_query_tool.py [選項]
 ```
 
-| 參數選項 | 英文完整參數 | 用途與說明 | 範例命令 |
+| 參數/子命令 | 完整名稱 | 用途與說明 | 範例命令 |
 | :--- | :--- | :--- | :--- |
+| **`disease`** / **`-d`** | `disease` | 模糊查詢本機預載之疾病衛教說明與臨床指引。 | `python3 utils/health_query_tool.py disease 多發性骨髓瘤` |
+| **`drug`** / **`-m`** | `drug` | 查詢個人歷史處方，並動態融合 `tw-med-db` 全台藥證與健保價。 | `python3 utils/health_query_tool.py drug 萬科` |
+| **`doctor`** / **`-p`** | `doctor` | 依醫師代號或關鍵字追溯所有關聯之就醫住院事件。 | `python3 utils/health_query_tool.py doctor H01180` |
+| **`lab`** / **`-l`** | `lab` | 查詢個人臨床檢驗指標歷史趨勢，自動與住院事件對齊。 | `python3 utils/health_query_tool.py lab WBC` |
+| **`code`** / **`-c`** | `code` | 翻譯臨床代碼（優先查詢 `tw-med-db` LOINC/健保碼，平滑降級至本地字典）。 | `python3 utils/health_query_tool.py code 1001-2` |
+| **`status`** / **`--status`**| `status` | 檢查個人資料庫與外部醫療大數據庫連線態勢與實體路徑。 | `python3 utils/health_query_tool.py status` |
+| **`-j`** | `--json` | 輸出單行緊湊 JSON 格式，方便 AI 代理人與 Unix 管道串接。 | `python3 utils/health_query_tool.py code 1001-2 -j` |
+| **`-q`** | `--quiet` | 極簡輸出模式。 | `python3 utils/health_query_tool.py status -q` |
+| **`--stdin`** / **`-`** | | 從標準輸入串流讀取查詢字串（Pipeline-Native）。 | `echo "1001-2" \| python3 utils/health_query_tool.py code - -j` |
 | **`-i`** | `--interactive` | 啟動互動式終端對話選單（無任何參數時的預設模式）。 | `python3 utils/health_query_tool.py -i` |
-| **`-d`** | `--disease` | 模糊查詢本機預載之疾病衛教說明與臨床指引。 | `python3 utils/health_query_tool.py -d 多發性骨髓瘤` |
-| **`-m`** | `--drug` | 查詢個人歷史處方，並動態融合 `tw-med-db` 全台藥證與健保價。 | `python3 utils/health_query_tool.py -m 萬科` |
-| **`-p`** | `--doctor` | 依醫師代號或關鍵字追溯所有關聯之就醫住院事件。 | `python3 utils/health_query_tool.py -p H01180` |
-| **`-l`** | `--lab` | 查詢個人臨床檢驗指標歷史趨勢，自動與住院事件對齊。 | `python3 utils/health_query_tool.py -l WBC` |
-| **`-c`** | `--code` | 翻譯臨床程式碼（優先查詢 `tw-med-db` LOINC/健保碼，平滑降級至本地字典）。 | `python3 utils/health_query_tool.py -c 1001-2` |
-| **`--no-med-db`** | | 強制停用外部醫療大資料庫，切換為純本地離線字典模式。 | `python3 utils/health_query_tool.py --no-med-db -c 89555-7` |
+| **`--no-med-db`** | | 強制停用外部醫療大資料庫，切換為純本地離線字典模式。 | `python3 utils/health_query_tool.py code 89555-7 --no-med-db` |
 | **`--with-med-db`**| | 強制嘗試啟用外部醫療大資料庫。 | `python3 utils/health_query_tool.py --with-med-db` |
 | **`--db`** | | 指定要讀取的自訂 SQLite 資料庫物理路徑。 | `python3 utils/health_query_tool.py --db db/template.db` |
+| **`man`** / **`manual`** | `manual` | 於終端機檢視完整說明書。 | `python3 utils/health_query_tool.py man` |
 
 ---
 
 ### 🧬 四大核心離線查證機制說明 (含 tw-med-db 醫療大資料融合)
 
-1. **疾病與指南查詢（-d / --disease）**：直接模糊檢索本機 SQLite 中的 `MY_EDUCATION_BASE`（衛教庫）並印出。結尾自動拼裝產生該疾病在 PubMed 上的 Guidelines 搜尋連結，引導病患直接查閱最新文獻，避免被模型舊記憶誤導。
-2. **個人用藥歷史差分與大資料藥證對照（-m / --drug）**：通用地遍歷個人歷程表中所有的 `MedicationRequest` 資源，依時間排序展現「劑量演變與目前狀態」。若環境中配置並啟用了 `tw-med-db`，系統將自動秒級檢索全台 6.6 萬筆官方藥品許可證，同步補充呈現健保程式碼、最新付款價格、有效主成分與核定適應症；若未啟用則平滑回退至純個人歷程模式。
-3. **醫師與原始病歷檔案溯源（-p / --doctor）**：在去識別化原始病歷（`data/raw/`）中進行全文關鍵字檢索。一旦發現匹配，系統會透過 SQL Join `artifact_id`，找出對應之就醫事件 `Encounter`，印出醫師所屬住院區間與去識別化的原始檔案名稱、路徑與前後文字片段。
-4. **檢驗指標歷史與就醫住院時間軸對齊（-l / --lab）**：查詢數值時，系統除列出時間趨勢外，會自動將每一筆檢驗日期與所有的住院區間進行交集比對（`Encounter.period.start <= Obs.date <= Encounter.period.end`），並在右方自動標註 `🏥 住院期間` 提醒。
-5. **臨床程式碼雙軌翻譯（-c / --code）**：優先查詢 `tw-med-db` 醫療大資料庫（涵蓋完整 LOINC 檢驗碼與 TFDA 藥證清單）；若未安裝或未啟用該庫，系統將自動且 100% 靜默平滑降級至本地精簡字典（`clinical_codes.json` 與內建備援），保證查詢體驗不中斷。
+1. **疾病與指南查詢（disease / -d）**：直接模糊檢索本機 SQLite 中的 `MY_EDUCATION_BASE`（衛教庫）並印出。結尾自動拼裝產生該疾病在 PubMed 上的 Guidelines 搜尋連結，引導病患直接查閱最新文獻，避免被模型舊記憶誤導。
+2. **個人用藥歷史差分與大資料藥證對照（drug / -m）**：通用地遍歷個人歷程表中所有的 `MedicationRequest` 資源，依時間排序展現「劑量演變與目前狀態」。若環境中配置並啟用了 `tw-med-db`，系統將自動秒級檢索全台官方藥品許可證，同步補充呈現健保代碼、最新核定價格、有效主成分與核定適應症；若未啟用則平滑回退至純個人歷程模式。
+3. **醫師與原始病歷檔案溯源（doctor / -p）**：在去識別化原始病歷（`data/raw/`）中進行全文關鍵字檢索。一旦發現匹配，系統會透過 SQL Join `artifact_id`，找出對應之就醫事件 `Encounter`，印出醫師所屬住院區間與去識別化的原始檔案名稱、路徑與前後文字片段。
+4. **檢驗指標歷史與就醫住院時間軸對齊（lab / -l）**：查詢數值時，系統除列出時間趨勢外，會自動將每一筆檢驗日期與所有的住院區間進行交集比對（`Encounter.period.start <= Obs.date <= Encounter.period.end`），並在右方自動標註 `🏥 住院期間` 提醒。
+5. **臨床代碼雙軌翻譯（code / -c）**：優先查詢 `tw-med-db` 醫療大資料庫（涵蓋完整 LOINC 檢驗碼與 TFDA 藥證清單）；若未安裝或未啟用該庫，系統將自動且 100% 靜默平滑降級至本地精簡字典（`clinical_codes.json` 與內建備援），保證查詢體驗不中斷。
+
+---
+
+### 🔀 管道串聯實戰範例 (Unix Pipe & Pipeline-Native)
+得益於 CGS v2.4 標準，SHVT 查詢工具能與 Unix 常用命令以及 AI 代理人零摩擦串聯：
+```bash
+# 1. 批次代碼管道串流翻譯，並以 jq 取出中文品名
+echo "1001-2" | python3 utils/health_query_tool.py code - -j | jq -r '.title'
+
+# 2. 鏈式檢查藥物歷史輸出 JSON，提供下游 LLM 分析
+python3 utils/health_query_tool.py drug "得利生" --json
+
+# 3. 快速輸出連線診斷供健康守門腳本使用
+python3 utils/health_query_tool.py status --quiet
+```
 
 ---
 
