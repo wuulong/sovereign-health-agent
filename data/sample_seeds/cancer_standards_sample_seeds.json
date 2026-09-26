@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "source": "NCI Enterprise Vocabulary Services (EVS) REST API",
+    "api_base": "https://api-evsrest.nci.nih.gov/api/v1/",
+    "standard": "CTCAE v5.0 / v6.0 Mappings in NCIt",
+    "extracted_date": "2026-09-14",
+    "target_db_tables": {
+      "tw-med-db": "M58_ctcae_terms (H57 國際毒性字典)",
+      "sha": "utils/cancer_toxicity_screener.py (病患毒性自評快篩)"
+    },
+    "description": "癌症全週期副作用/毒性評估 (CTCAE) 官方種子範例資料，用於驗證 NCI EVS API 整合與離線測試"
+  },
+  "samples": {
+    "C143752": {
+      "code": "C143752",
+      "name": "Peripheral Sensory Neuropathy, CTCAE",
+      "definition": "A disorder characterized by damage or dysfunction of the peripheral sensory nerves.",
+      "ctcae_properties": []
+    },
+    "C144328": {
+      "code": "C144328",
+      "name": "Grade 1 Peripheral Sensory Neuropathy, CTCAE",
+      "definition": "Mild symptoms",
+      "ctcae_properties": []
+    },
+    "C144912": {
+      "code": "C144912",
+      "name": "Grade 2 Peripheral Sensory Neuropathy, CTCAE",
+      "definition": "Moderate symptoms; limiting instrumental ADL or mild/moderate impact on age-appropriate normal daily activity (pediatric)",
+      "ctcae_properties": []
+    },
+    "C145535": {
+      "code": "C145535",
+      "name": "Grade 3 Peripheral Sensory Neuropathy, CTCAE",
+      "definition": "Severe symptoms; limiting self-care ADL or severe impact on age-appropriate normal daily activity (pediatric)",
+      "ctcae_properties": []
+    },
+    "C146043": {
+      "code": "C146043",
+      "name": "Grade 4 Peripheral Sensory Neuropathy, CTCAE",
+      "definition": "Life-threatening consequences; urgent intervention indicated",
+      "ctcae_properties": []
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "pgs_spec_version": "3.2",
+  "project_id": "sovereign-health-agent",
+  "name": "sovereign-health-agent",
+  "description": "端側個人主權健康代理人 (Edge Sovereign Health Agent) 與三位一體自主健康管理系統",
+  "lifecycle_state": "POC_READY",
+  "domain_tags": [
+    "events-2026Q3",
+    "healthcare",
+    "patient-sovereignty",
+    "fhir"
+  ],
+  "owner": "Antigravity",
+  "created_at": "2026-09-05 06:52:29",
+  "updated_at": "2026-09-26 18:05:00",
+  "sys_eng_path": "sys_eng",
+  "aiif_path": "aiif",
+  "dbs": [
+    "db/instances/{profile}/fv_patient_personal.db",
+    "db/template.db"
+  ],
+  "scripts": [
+    "utils/health_query_tool.py",
+    "utils/tw_med_bridge.py",
+    "patient/patient_agent.py",
+    "utils/db_porter.py"
+  ],
+  "relations": {
+    "books": [
+      "book/README.md"
+    ],
+    "parent_project": null,
+    "collaborators": [
+      "tw-med-db",
+      "tdhi-agent-sandbox"
+    ]
+  }
+}

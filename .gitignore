@@ -18,6 +18,9 @@ scratch/
 *_files/
 *.zip
 *.json
+!data/sample_seeds/*.json
+!config.json.example
+!project.meta.json
 
 # Patient Anonymized Reports & Consultation Summaries (Privacy Security)
 reports/
